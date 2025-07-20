@@ -29,17 +29,19 @@ interface GameState {
   score: number
   health: number
   level: number
-  gameStatus: 'menu' | 'playing' | 'gameOver' | 'levelComplete' | 'timeUp'
+  gameStatus: 'menu' | 'playing' | 'gameOver' | 'levelComplete' | 'gameWon'
   keysPressed: Set<string>
-  timeLeft: number
+  goodFoodCollected: number
+  totalGoodFood: number
+  hasReachedEnd: boolean
 }
 
 const GAME_WIDTH = 800
 const GAME_HEIGHT = 600
-const PANDA_SIZE = 40
-const FOOD_SIZE = 30
-const PANDA_SPEED = 5
-const LEVEL_TIME = 60 // 60 seconds per level
+const PANDA_SIZE = 30
+const FOOD_SIZE = 25
+const PANDA_SPEED = 4
+const CELL_SIZE = 40
 
 const GOOD_FOODS = [
   { emoji: '🎋', points: 10 }, // bamboo
@@ -57,13 +59,58 @@ const BAD_FOODS = [
   { emoji: '🍩', points: -18 }, // donut
 ]
 
+// Maze layouts for different levels
+const MAZE_LAYOUTS = [
+  // Level 1 - Simple maze
+  [
+    "####################",
+    "#S.....#...........#",
+    "#.####.#.#########.#",
+    "#....#...#.......#.#",
+    "####.#####.#####.#.#",
+    "#..........#...#...#",
+    "#.########.#.#.###.#",
+    "#.#......#...#.....#",
+    "#.#.####.#########.#",
+    "#...#..............E",
+    "####################"
+  ],
+  // Level 2 - More complex
+  [
+    "####################",
+    "#S.#...............#",
+    "#.#.#############.##",
+    "#...#...........#..#",
+    "#####.#########.##.#",
+    "#.....#.......#....#",
+    "#.#####.#####.####.#",
+    "#.......#...#......#",
+    "#######.#.#.#######E",
+    "#.......#.#........#",
+    "####################"
+  ],
+  // Level 3 - Advanced maze
+  [
+    "####################",
+    "#S.................#",
+    "##.###############.#",
+    "#..#.............#.#",
+    "#.##.###########.#.#",
+    "#....#.........#...#",
+    "######.#######.###.#",
+    "#......#.....#.....#",
+    "#.######.###.#####.#",
+    "#................#E#",
+    "####################"
+  ]
+]
+
 const PandaGame: React.FC = () => {
   const gameAreaRef = useRef<HTMLDivElement>(null)
   const animationFrameRef = useRef<number>()
-  const timerRef = useRef<number>()
   
   const [gameState, setGameState] = useState<GameState>({
-    panda: { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 },
+    panda: { x: 0, y: 0 },
     foods: [],
     walls: [],
     score: 0,
@@ -71,7 +118,9 @@ const PandaGame: React.FC = () => {
     level: 1,
     gameStatus: 'menu',
     keysPressed: new Set(),
-    timeLeft: LEVEL_TIME
+    goodFoodCollected: 0,
+    totalGoodFood: 0,
+    hasReachedEnd: false
   })
 
   const checkCollision = useCallback((pos1: Position, pos2: Position, size1: number, size2: number): boolean => {
@@ -83,95 +132,88 @@ const PandaGame: React.FC = () => {
     )
   }, [])
 
-  const generateWalls = useCallback((level: number): Wall[] => {
-    const wallCount = Math.min(2 + Math.floor(level / 2), 8) // Increase walls with level
+  const generateMaze = useCallback((level: number) => {
+    const mazeIndex = Math.min(level - 1, MAZE_LAYOUTS.length - 1)
+    const maze = MAZE_LAYOUTS[mazeIndex]
+    
     const walls: Wall[] = []
+    const foods: FoodItem[] = []
+    let startPos = { x: 0, y: 0 }
+    let endPos = { x: 0, y: 0 }
+    let goodFoodCount = 0
     
-    for (let i = 0; i < wallCount; i++) {
-      const isHorizontal = Math.random() > 0.5
-      const width = isHorizontal ? 100 + Math.random() * 150 : 20
-      const height = isHorizontal ? 20 : 100 + Math.random() * 150
-      
-      let position: Position
-      let attempts = 0
-      
-      // Try to place walls away from center and other walls
-      do {
-        position = {
-          x: Math.random() * (GAME_WIDTH - width),
-          y: Math.random() * (GAME_HEIGHT - height)
+    // Calculate cell dimensions
+    const cellWidth = GAME_WIDTH / maze[0].length
+    const cellHeight = GAME_HEIGHT / maze.length
+    
+    maze.forEach((row, rowIndex) => {
+      row.split('').forEach((cell, colIndex) => {
+        const x = colIndex * cellWidth
+        const y = rowIndex * cellHeight
+        
+        if (cell === '#') {
+          // Wall
+          walls.push({
+            id: `wall-${rowIndex}-${colIndex}`,
+            position: { x, y },
+            width: cellWidth,
+            height: cellHeight
+          })
+        } else if (cell === 'S') {
+          // Start position
+          startPos = { 
+            x: x + cellWidth / 2 - PANDA_SIZE / 2, 
+            y: y + cellHeight / 2 - PANDA_SIZE / 2 
+          }
+        } else if (cell === 'E') {
+          // End position
+          endPos = { x, y }
+        } else if (cell === '.' && Math.random() < 0.3) {
+          // Random food placement in open spaces
+          const isGood = Math.random() > 0.4 // 60% good food, 40% bad food
+          const foodArray = isGood ? GOOD_FOODS : BAD_FOODS
+          const food = foodArray[Math.floor(Math.random() * foodArray.length)]
+          
+          if (isGood) goodFoodCount++
+          
+          foods.push({
+            id: `food-${rowIndex}-${colIndex}`,
+            type: isGood ? 'good' : 'bad',
+            emoji: food.emoji,
+            position: { 
+              x: x + cellWidth / 2 - FOOD_SIZE / 2, 
+              y: y + cellHeight / 2 - FOOD_SIZE / 2 
+            },
+            points: food.points
+          })
         }
-        attempts++
-      } while (attempts < 50 && (
-        // Avoid center area where panda starts
-        (position.x < GAME_WIDTH / 2 + 100 && position.x + width > GAME_WIDTH / 2 - 100 &&
-         position.y < GAME_HEIGHT / 2 + 100 && position.y + height > GAME_HEIGHT / 2 - 100) ||
-        // Avoid overlapping with existing walls
-        walls.some(wall => 
-          checkCollision(position, wall.position, Math.max(width, height), Math.max(wall.width, wall.height))
-        )
-      ))
-      
-      walls.push({
-        id: `wall-${i}`,
-        position,
-        width,
-        height
       })
-    }
+    })
     
-    return walls
-  }, [checkCollision])
-
-  const generateFood = useCallback((level: number, walls: Wall[]): FoodItem => {
-    const isGood = Math.random() > 0.3 // 70% good food, 30% bad food
-    const foodArray = isGood ? GOOD_FOODS : BAD_FOODS
-    const food = foodArray[Math.floor(Math.random() * foodArray.length)]
-    
-    let position: Position
-    let attempts = 0
-    
-    // Try to place food away from walls
-    do {
-      position = {
-        x: Math.random() * (GAME_WIDTH - FOOD_SIZE),
-        y: Math.random() * (GAME_HEIGHT - FOOD_SIZE)
-      }
-      attempts++
-    } while (attempts < 50 && walls.some(wall => 
-      checkCollision(position, wall.position, FOOD_SIZE, Math.max(wall.width, wall.height))
-    ))
-    
-    return {
-      id: Math.random().toString(36).substr(2, 9),
-      type: isGood ? 'good' : 'bad',
-      emoji: food.emoji,
-      position,
-      points: food.points
-    }
-  }, [checkCollision])
+    return { walls, foods, startPos, endPos, goodFoodCount }
+  }, [])
 
   const initializeLevel = useCallback((level: number) => {
-    const walls = generateWalls(level)
-    const foodCount = Math.min(5 + level * 2, 15) // Increase food count with level
-    const foods = Array.from({ length: foodCount }, () => generateFood(level, walls))
+    const { walls, foods, startPos, endPos, goodFoodCount } = generateMaze(level)
     
     setGameState(prev => ({
       ...prev,
-      foods,
       walls,
-      panda: { x: GAME_WIDTH / 2, y: GAME_HEIGHT / 2 },
+      foods,
+      panda: startPos,
       gameStatus: 'playing',
-      timeLeft: LEVEL_TIME
+      goodFoodCollected: 0,
+      totalGoodFood: goodFoodCount,
+      hasReachedEnd: false
     }))
-  }, [generateFood, generateWalls])
+  }, [generateMaze])
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd', 'W', 'A', 'S', 'D'].includes(event.key)) {
       event.preventDefault()
       setGameState(prev => ({
         ...prev,
-        keysPressed: new Set([...prev.keysPressed, event.key])
+        keysPressed: new Set([...prev.keysPressed, event.key.toLowerCase()])
       }))
     }
   }, [])
@@ -179,7 +221,7 @@ const PandaGame: React.FC = () => {
   const handleKeyUp = useCallback((event: KeyboardEvent) => {
     setGameState(prev => {
       const newKeysPressed = new Set(prev.keysPressed)
-      newKeysPressed.delete(event.key)
+      newKeysPressed.delete(event.key.toLowerCase())
       return {
         ...prev,
         keysPressed: newKeysPressed
@@ -194,31 +236,33 @@ const PandaGame: React.FC = () => {
       let newPanda = { ...prev.panda }
       
       // Handle movement with wall collision detection
-      if (prev.keysPressed.has('ArrowUp')) {
-        const testY = Math.max(0, newPanda.y - PANDA_SPEED)
+      const moveSpeed = PANDA_SPEED
+      
+      if (prev.keysPressed.has('arrowup') || prev.keysPressed.has('w')) {
+        const testY = Math.max(0, newPanda.y - moveSpeed)
         const testPanda = { ...newPanda, y: testY }
-        if (!prev.walls.some(wall => checkCollision(testPanda, wall.position, PANDA_SIZE, Math.max(wall.width, wall.height)))) {
+        if (!prev.walls.some(wall => checkCollision(testPanda, wall.position, PANDA_SIZE, wall.width))) {
           newPanda = { ...newPanda, y: testY }
         }
       }
-      if (prev.keysPressed.has('ArrowDown')) {
-        const testY = Math.min(GAME_HEIGHT - PANDA_SIZE, newPanda.y + PANDA_SPEED)
+      if (prev.keysPressed.has('arrowdown') || prev.keysPressed.has('s')) {
+        const testY = Math.min(GAME_HEIGHT - PANDA_SIZE, newPanda.y + moveSpeed)
         const testPanda = { ...newPanda, y: testY }
-        if (!prev.walls.some(wall => checkCollision(testPanda, wall.position, PANDA_SIZE, Math.max(wall.width, wall.height)))) {
+        if (!prev.walls.some(wall => checkCollision(testPanda, wall.position, PANDA_SIZE, wall.width))) {
           newPanda = { ...newPanda, y: testY }
         }
       }
-      if (prev.keysPressed.has('ArrowLeft')) {
-        const testX = Math.max(0, newPanda.x - PANDA_SPEED)
+      if (prev.keysPressed.has('arrowleft') || prev.keysPressed.has('a')) {
+        const testX = Math.max(0, newPanda.x - moveSpeed)
         const testPanda = { ...newPanda, x: testX }
-        if (!prev.walls.some(wall => checkCollision(testPanda, wall.position, PANDA_SIZE, Math.max(wall.width, wall.height)))) {
+        if (!prev.walls.some(wall => checkCollision(testPanda, wall.position, PANDA_SIZE, wall.width))) {
           newPanda = { ...newPanda, x: testX }
         }
       }
-      if (prev.keysPressed.has('ArrowRight')) {
-        const testX = Math.min(GAME_WIDTH - PANDA_SIZE, newPanda.x + PANDA_SPEED)
+      if (prev.keysPressed.has('arrowright') || prev.keysPressed.has('d')) {
+        const testX = Math.min(GAME_WIDTH - PANDA_SIZE, newPanda.x + moveSpeed)
         const testPanda = { ...newPanda, x: testX }
-        if (!prev.walls.some(wall => checkCollision(testPanda, wall.position, PANDA_SIZE, Math.max(wall.width, wall.height)))) {
+        if (!prev.walls.some(wall => checkCollision(testPanda, wall.position, PANDA_SIZE, wall.width))) {
           newPanda = { ...newPanda, x: testX }
         }
       }
@@ -226,32 +270,36 @@ const PandaGame: React.FC = () => {
       // Check food collisions
       let newScore = prev.score
       let newHealth = prev.health
+      let newGoodFoodCollected = prev.goodFoodCollected
+      
       const newFoods = prev.foods.filter(food => {
         if (checkCollision(newPanda, food.position, PANDA_SIZE, FOOD_SIZE)) {
           newScore += food.points
           if (food.type === 'good') {
             newHealth = Math.min(100, newHealth + 5)
+            newGoodFoodCollected++
           } else {
-            newHealth = Math.max(0, newHealth - 10)
+            newHealth = Math.max(0, newHealth - 15)
           }
           return false // Remove eaten food
         }
         return true
       })
 
-      // Check win condition (all good food eaten)
-      const hasGoodFood = newFoods.some(food => food.type === 'good')
+      // Check if reached end position (right edge of the game area)
+      const hasReachedEnd = newPanda.x >= GAME_WIDTH - PANDA_SIZE - 10
+
+      // Determine game status
       let newGameStatus = prev.gameStatus
 
-      if (!hasGoodFood && newFoods.length > 0) {
-        // Level complete - only bad food left
-        newGameStatus = 'levelComplete'
-      } else if (newHealth <= 0) {
-        // Game over
+      if (newHealth <= 0) {
         newGameStatus = 'gameOver'
-      } else if (prev.timeLeft <= 0) {
-        // Time up
-        newGameStatus = 'timeUp'
+      } else if (hasReachedEnd && newGoodFoodCollected === prev.totalGoodFood) {
+        // Must collect ALL good food AND reach the end
+        newGameStatus = 'levelComplete'
+      } else if (hasReachedEnd && newGoodFoodCollected < prev.totalGoodFood) {
+        // Reached end but didn't collect all good food
+        newGameStatus = 'gameOver'
       }
 
       return {
@@ -260,32 +308,12 @@ const PandaGame: React.FC = () => {
         foods: newFoods,
         score: newScore,
         health: newHealth,
+        goodFoodCollected: newGoodFoodCollected,
+        hasReachedEnd,
         gameStatus: newGameStatus
       }
     })
   }, [checkCollision])
-
-  // Timer countdown
-  useEffect(() => {
-    if (gameState.gameStatus === 'playing') {
-      timerRef.current = window.setInterval(() => {
-        setGameState(prev => ({
-          ...prev,
-          timeLeft: Math.max(0, prev.timeLeft - 1)
-        }))
-      }, 1000)
-    } else {
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-      }
-    }
-
-    return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current)
-      }
-    }
-  }, [gameState.gameStatus])
 
   // Game loop
   useEffect(() => {
@@ -304,17 +332,16 @@ const PandaGame: React.FC = () => {
     }
   }, [gameState.gameStatus, updateGame])
 
-  // Keyboard event listeners
+  // Keyboard event listeners with improved focus handling
   useEffect(() => {
     const gameArea = gameAreaRef.current
     if (!gameArea) return
 
-    // Focus the game area when playing
+    // Always focus the game area when playing
     if (gameState.gameStatus === 'playing') {
       gameArea.focus()
     }
 
-    // Add event listeners to both window and game area for better reliability
     const handleKeyDownWrapper = (event: KeyboardEvent) => {
       if (gameState.gameStatus === 'playing') {
         handleKeyDown(event)
@@ -327,16 +354,13 @@ const PandaGame: React.FC = () => {
       }
     }
 
-    window.addEventListener('keydown', handleKeyDownWrapper)
-    window.addEventListener('keyup', handleKeyUpWrapper)
-    gameArea.addEventListener('keydown', handleKeyDownWrapper)
-    gameArea.addEventListener('keyup', handleKeyUpWrapper)
+    // Add listeners to document for better reliability
+    document.addEventListener('keydown', handleKeyDownWrapper, true)
+    document.addEventListener('keyup', handleKeyUpWrapper, true)
 
     return () => {
-      window.removeEventListener('keydown', handleKeyDownWrapper)
-      window.removeEventListener('keyup', handleKeyUpWrapper)
-      gameArea.removeEventListener('keydown', handleKeyDownWrapper)
-      gameArea.removeEventListener('keyup', handleKeyUpWrapper)
+      document.removeEventListener('keydown', handleKeyDownWrapper, true)
+      document.removeEventListener('keyup', handleKeyUpWrapper, true)
     }
   }, [handleKeyDown, handleKeyUp, gameState.gameStatus])
 
@@ -353,6 +377,11 @@ const PandaGame: React.FC = () => {
 
   const nextLevel = () => {
     const newLevel = gameState.level + 1
+    if (newLevel > MAZE_LAYOUTS.length) {
+      setGameState(prev => ({ ...prev, gameStatus: 'gameWon' }))
+      return
+    }
+    
     setGameState(prev => ({
       ...prev,
       level: newLevel
@@ -364,30 +393,24 @@ const PandaGame: React.FC = () => {
     startGame()
   }
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60)
-    const secs = seconds % 60
-    return `${mins}:${secs.toString().padStart(2, '0')}`
-  }
-
   if (gameState.gameStatus === 'menu') {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-b from-green-100 to-green-200">
         <Card className="p-8 text-center max-w-md mx-4">
           <div className="text-6xl mb-4">🐼</div>
-          <h1 className="text-3xl font-bold text-green-800 mb-4">Panda Food Adventure</h1>
+          <h1 className="text-3xl font-bold text-green-800 mb-4">Panda Maze Adventure</h1>
           <p className="text-green-600 mb-6">
-            Help the panda eat healthy foods while avoiding junk food and navigating around walls!
+            Navigate the maze from START to END! Collect ALL the healthy foods but avoid junk food to win each level.
           </p>
           <div className="text-sm text-green-500 mb-6">
-            <p>🎋 🍎 🍇 = Good (+points, +health)</p>
-            <p>🍔 🍕 🍭 = Bad (-points, -health)</p>
-            <p>🧱 = Walls (avoid them!)</p>
-            <p>⏰ = Beat the timer!</p>
-            <p className="mt-2">Use arrow keys to move</p>
+            <p>🎋 🍎 🍇 = Good food (collect ALL to win!)</p>
+            <p>🍔 🍕 🍭 = Bad food (avoid these!)</p>
+            <p>🟫 = Walls (can't pass through)</p>
+            <p className="mt-2 font-semibold">Use arrow keys or WASD to move</p>
+            <p className="text-xs mt-2">You MUST collect all good food AND reach the end!</p>
           </div>
           <Button onClick={startGame} className="bg-green-600 hover:bg-green-700">
-            Start Game
+            Start Adventure
           </Button>
         </Card>
       </div>
@@ -395,36 +418,16 @@ const PandaGame: React.FC = () => {
   }
 
   if (gameState.gameStatus === 'gameOver') {
+    const reason = gameState.health <= 0 ? 
+      "The panda ate too much junk food!" : 
+      "You reached the end but didn't collect all the good food!"
+    
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-b from-red-100 to-red-200">
         <Card className="p-8 text-center max-w-md mx-4">
           <div className="text-6xl mb-4">😵</div>
           <h2 className="text-3xl font-bold text-red-800 mb-4">Game Over!</h2>
-          <p className="text-red-600 mb-4">The panda ate too much junk food!</p>
-          <p className="text-lg font-semibold mb-6">Final Score: {gameState.score}</p>
-          <div className="space-x-4">
-            <Button onClick={restartGame} className="bg-green-600 hover:bg-green-700">
-              Play Again
-            </Button>
-            <Button 
-              onClick={() => setGameState(prev => ({ ...prev, gameStatus: 'menu' }))}
-              variant="outline"
-            >
-              Main Menu
-            </Button>
-          </div>
-        </Card>
-      </div>
-    )
-  }
-
-  if (gameState.gameStatus === 'timeUp') {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-b from-orange-100 to-orange-200">
-        <Card className="p-8 text-center max-w-md mx-4">
-          <div className="text-6xl mb-4">⏰</div>
-          <h2 className="text-3xl font-bold text-orange-800 mb-4">Time's Up!</h2>
-          <p className="text-orange-600 mb-4">The panda ran out of time!</p>
+          <p className="text-red-600 mb-4">{reason}</p>
           <p className="text-lg font-semibold mb-6">Final Score: {gameState.score}</p>
           <div className="space-x-4">
             <Button onClick={restartGame} className="bg-green-600 hover:bg-green-700">
@@ -448,11 +451,35 @@ const PandaGame: React.FC = () => {
         <Card className="p-8 text-center max-w-md mx-4">
           <div className="text-6xl mb-4">🎉</div>
           <h2 className="text-3xl font-bold text-yellow-800 mb-4">Level Complete!</h2>
-          <p className="text-yellow-600 mb-4">Great job! The panda ate all the healthy food!</p>
+          <p className="text-yellow-600 mb-4">Amazing! You collected all the good food and reached the end!</p>
           <p className="text-lg font-semibold mb-6">Score: {gameState.score}</p>
           <Button onClick={nextLevel} className="bg-green-600 hover:bg-green-700">
             Next Level ({gameState.level + 1})
           </Button>
+        </Card>
+      </div>
+    )
+  }
+
+  if (gameState.gameStatus === 'gameWon') {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-b from-purple-100 to-purple-200">
+        <Card className="p-8 text-center max-w-md mx-4">
+          <div className="text-6xl mb-4">🏆</div>
+          <h2 className="text-3xl font-bold text-purple-800 mb-4">Congratulations!</h2>
+          <p className="text-purple-600 mb-4">You've completed all the maze levels!</p>
+          <p className="text-lg font-semibold mb-6">Final Score: {gameState.score}</p>
+          <div className="space-x-4">
+            <Button onClick={restartGame} className="bg-green-600 hover:bg-green-700">
+              Play Again
+            </Button>
+            <Button 
+              onClick={() => setGameState(prev => ({ ...prev, gameStatus: 'menu' }))}
+              variant="outline"
+            >
+              Main Menu
+            </Button>
+          </div>
         </Card>
       </div>
     )
@@ -478,9 +505,8 @@ const PandaGame: React.FC = () => {
           </div>
         </div>
         <div className="bg-white rounded-lg px-4 py-2 shadow-md">
-          <span className="font-semibold text-green-800">Time: </span>
-          <span className={`font-mono ${gameState.timeLeft <= 10 ? 'text-red-600' : 'text-green-800'}`}>
-            {formatTime(gameState.timeLeft)}
+          <span className="font-semibold text-green-800">
+            Good Food: {gameState.goodFoodCollected}/{gameState.totalGoodFood}
           </span>
         </div>
       </div>
@@ -488,7 +514,7 @@ const PandaGame: React.FC = () => {
       {/* Game Area */}
       <div 
         ref={gameAreaRef}
-        className="relative bg-green-50 border-4 border-green-300 rounded-lg shadow-lg overflow-hidden focus:outline-none focus:ring-2 focus:ring-green-500"
+        className="relative bg-green-50 border-4 border-green-300 rounded-lg shadow-lg overflow-hidden focus:outline-none focus:ring-4 focus:ring-green-500"
         style={{ width: GAME_WIDTH, height: GAME_HEIGHT }}
         tabIndex={0}
         onClick={() => gameAreaRef.current?.focus()}
@@ -498,7 +524,7 @@ const PandaGame: React.FC = () => {
         {gameState.walls.map(wall => (
           <div
             key={wall.id}
-            className="absolute bg-stone-600 border border-stone-700 rounded-sm"
+            className="absolute bg-stone-700 border border-stone-800"
             style={{
               left: wall.position.x,
               top: wall.position.y,
@@ -508,9 +534,39 @@ const PandaGame: React.FC = () => {
           />
         ))}
 
+        {/* End zone indicator */}
+        <div
+          className="absolute bg-yellow-300 border-2 border-yellow-500 opacity-50"
+          style={{
+            right: 0,
+            top: 0,
+            width: 40,
+            height: GAME_HEIGHT,
+          }}
+        >
+          <div className="text-center text-yellow-800 font-bold text-xs mt-2 transform rotate-90">
+            END
+          </div>
+        </div>
+
+        {/* Start zone indicator */}
+        <div
+          className="absolute bg-blue-300 border-2 border-blue-500 opacity-50"
+          style={{
+            left: 0,
+            top: 0,
+            width: 40,
+            height: GAME_HEIGHT,
+          }}
+        >
+          <div className="text-center text-blue-800 font-bold text-xs mt-2 transform rotate-90">
+            START
+          </div>
+        </div>
+
         {/* Panda */}
         <div
-          className="absolute text-4xl transition-all duration-75 ease-linear z-10"
+          className="absolute text-3xl transition-all duration-75 ease-linear z-20"
           style={{
             left: gameState.panda.x,
             top: gameState.panda.y,
@@ -525,7 +581,7 @@ const PandaGame: React.FC = () => {
         {gameState.foods.map(food => (
           <div
             key={food.id}
-            className="absolute text-2xl z-5"
+            className="absolute text-xl z-10"
             style={{
               left: food.position.x,
               top: food.position.y,
@@ -538,15 +594,20 @@ const PandaGame: React.FC = () => {
         ))}
 
         {/* Instructions overlay */}
-        <div className="absolute top-4 left-4 bg-white bg-opacity-90 rounded-lg p-2 text-xs text-green-700">
-          <div>Use arrow keys to move</div>
+        <div className="absolute top-4 left-4 bg-white bg-opacity-95 rounded-lg p-3 text-xs text-green-700 max-w-48">
+          <div className="font-semibold">Controls:</div>
+          <div>Arrow keys or WASD to move</div>
+          <div className="mt-1 font-semibold">Goal:</div>
+          <div>Collect ALL good food, then reach END</div>
           <div className="text-green-500 mt-1">Click here if keys don't work</div>
         </div>
       </div>
 
       {/* Controls hint */}
       <div className="mt-4 text-center text-green-600">
-        <p className="text-sm">🎋 Eat healthy foods • 🍔 Avoid junk food • 🧱 Navigate around walls • ⏰ Beat the timer!</p>
+        <p className="text-sm">
+          🎋 Collect ALL good foods • 🍔 Avoid junk food • 🏁 Reach the END zone to win!
+        </p>
       </div>
     </div>
   )

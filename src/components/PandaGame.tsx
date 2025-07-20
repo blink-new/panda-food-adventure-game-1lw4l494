@@ -59,50 +59,79 @@ const BAD_FOODS = [
   { emoji: '🍩', points: -18 }, // donut
 ]
 
-// Maze layouts for different levels
+// Maze layouts for different levels with guaranteed solvable paths
 const MAZE_LAYOUTS = [
-  // Level 1 - Simple maze
-  [
-    "####################",
-    "#S.....#...........#",
-    "#.####.#.#########.#",
-    "#....#...#.......#.#",
-    "####.#####.#####.#.#",
-    "#..........#...#...#",
-    "#.########.#.#.###.#",
-    "#.#......#...#.....#",
-    "#.#.####.#########.#",
-    "#...#..............E",
-    "####################"
-  ],
-  // Level 2 - More complex
-  [
-    "####################",
-    "#S.#...............#",
-    "#.#.#############.##",
-    "#...#...........#..#",
-    "#####.#########.##.#",
-    "#.....#.......#....#",
-    "#.#####.#####.####.#",
-    "#.......#...#......#",
-    "#######.#.#.#######E",
-    "#.......#.#........#",
-    "####################"
-  ],
-  // Level 3 - Advanced maze
-  [
-    "####################",
-    "#S.................#",
-    "##.###############.#",
-    "#..#.............#.#",
-    "#.##.###########.#.#",
-    "#....#.........#...#",
-    "######.#######.###.#",
-    "#......#.....#.....#",
-    "#.######.###.#####.#",
-    "#................#E#",
-    "####################"
-  ]
+  // Level 1 - Simple maze with clear path
+  {
+    layout: [
+      "####################",
+      "#S.....#...........#",
+      "#.####.#.#########.#",
+      "#....#...#.......#.#",
+      "####.#####.#####.#.#",
+      "#..........#...#...#",
+      "#.########.#.#.###.#",
+      "#.#......#...#.....#",
+      "#.#.####.#########.#",
+      "#...#..............E",
+      "####################"
+    ],
+    goodFoodPositions: [
+      {row: 1, col: 2}, {row: 1, col: 4}, {row: 3, col: 2}, 
+      {row: 5, col: 2}, {row: 7, col: 2}, {row: 9, col: 2}
+    ],
+    badFoodPositions: [
+      {row: 1, col: 12}, {row: 3, col: 15}, {row: 7, col: 15}
+    ]
+  },
+  // Level 2 - Fixed maze with proper escape route
+  {
+    layout: [
+      "####################",
+      "#S.................#",
+      "#.################.#",
+      "#................#.#",
+      "################.#.#",
+      "#................#.#",
+      "#.################.#",
+      "#..................#",
+      "##################.#",
+      "#..................E",
+      "####################"
+    ],
+    goodFoodPositions: [
+      {row: 1, col: 3}, {row: 1, col: 8}, {row: 3, col: 5}, 
+      {row: 3, col: 12}, {row: 5, col: 3}, {row: 7, col: 8}, 
+      {row: 9, col: 5}, {row: 9, col: 15}
+    ],
+    badFoodPositions: [
+      {row: 1, col: 15}, {row: 5, col: 15}, {row: 7, col: 3}
+    ]
+  },
+  // Level 3 - Advanced maze with multiple paths
+  {
+    layout: [
+      "####################",
+      "#S.......#.........#",
+      "#.#######.#.#####.##",
+      "#.......#.#.....#..#",
+      "#######.#.#####.##.#",
+      "#.......#.......#..#",
+      "#.#######.#######.##",
+      "#.......#.........##",
+      "#.#####.###########E",
+      "#...................#",
+      "####################"
+    ],
+    goodFoodPositions: [
+      {row: 1, col: 3}, {row: 1, col: 6}, {row: 3, col: 3}, 
+      {row: 3, col: 13}, {row: 5, col: 3}, {row: 5, col: 13}, 
+      {row: 7, col: 3}, {row: 9, col: 3}, {row: 9, col: 8}, {row: 9, col: 15}
+    ],
+    badFoodPositions: [
+      {row: 1, col: 15}, {row: 3, col: 8}, {row: 7, col: 12}, {row: 9, col: 12}
+    ]
+  }
 ]
 
 const PandaGame: React.FC = () => {
@@ -134,18 +163,19 @@ const PandaGame: React.FC = () => {
 
   const generateMaze = useCallback((level: number) => {
     const mazeIndex = Math.min(level - 1, MAZE_LAYOUTS.length - 1)
-    const maze = MAZE_LAYOUTS[mazeIndex]
+    const mazeData = MAZE_LAYOUTS[mazeIndex]
+    const maze = mazeData.layout
     
     const walls: Wall[] = []
     const foods: FoodItem[] = []
     let startPos = { x: 0, y: 0 }
     let endPos = { x: 0, y: 0 }
-    let goodFoodCount = 0
     
     // Calculate cell dimensions
     const cellWidth = GAME_WIDTH / maze[0].length
     const cellHeight = GAME_HEIGHT / maze.length
     
+    // Process maze layout for walls and positions
     maze.forEach((row, rowIndex) => {
       row.split('').forEach((cell, colIndex) => {
         const x = colIndex * cellWidth
@@ -168,29 +198,47 @@ const PandaGame: React.FC = () => {
         } else if (cell === 'E') {
           // End position
           endPos = { x, y }
-        } else if (cell === '.' && Math.random() < 0.3) {
-          // Random food placement in open spaces
-          const isGood = Math.random() > 0.4 // 60% good food, 40% bad food
-          const foodArray = isGood ? GOOD_FOODS : BAD_FOODS
-          const food = foodArray[Math.floor(Math.random() * foodArray.length)]
-          
-          if (isGood) goodFoodCount++
-          
-          foods.push({
-            id: `food-${rowIndex}-${colIndex}`,
-            type: isGood ? 'good' : 'bad',
-            emoji: food.emoji,
-            position: { 
-              x: x + cellWidth / 2 - FOOD_SIZE / 2, 
-              y: y + cellHeight / 2 - FOOD_SIZE / 2 
-            },
-            points: food.points
-          })
         }
       })
     })
     
-    return { walls, foods, startPos, endPos, goodFoodCount }
+    // Add good food at predefined positions
+    mazeData.goodFoodPositions.forEach((pos, index) => {
+      const x = pos.col * cellWidth
+      const y = pos.row * cellHeight
+      const food = GOOD_FOODS[index % GOOD_FOODS.length]
+      
+      foods.push({
+        id: `good-food-${index}`,
+        type: 'good',
+        emoji: food.emoji,
+        position: { 
+          x: x + cellWidth / 2 - FOOD_SIZE / 2, 
+          y: y + cellHeight / 2 - FOOD_SIZE / 2 
+        },
+        points: food.points
+      })
+    })
+    
+    // Add bad food at predefined positions
+    mazeData.badFoodPositions.forEach((pos, index) => {
+      const x = pos.col * cellWidth
+      const y = pos.row * cellHeight
+      const food = BAD_FOODS[index % BAD_FOODS.length]
+      
+      foods.push({
+        id: `bad-food-${index}`,
+        type: 'bad',
+        emoji: food.emoji,
+        position: { 
+          x: x + cellWidth / 2 - FOOD_SIZE / 2, 
+          y: y + cellHeight / 2 - FOOD_SIZE / 2 
+        },
+        points: food.points
+      })
+    })
+    
+    return { walls, foods, startPos, endPos, goodFoodCount: mazeData.goodFoodPositions.length }
   }, [])
 
   const initializeLevel = useCallback((level: number) => {

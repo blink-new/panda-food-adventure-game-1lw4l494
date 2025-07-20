@@ -34,6 +34,7 @@ interface GameState {
   goodFoodCollected: number
   totalGoodFood: number
   hasReachedEnd: boolean
+  isMoving: boolean
 }
 
 const GAME_WIDTH = 800
@@ -149,7 +150,8 @@ const PandaGame: React.FC = () => {
     keysPressed: new Set(),
     goodFoodCollected: 0,
     totalGoodFood: 0,
-    hasReachedEnd: false
+    hasReachedEnd: false,
+    isMoving: false
   })
 
   const checkCollision = useCallback((pos1: Position, pos2: Position, size1: number, size2: number): boolean => {
@@ -272,7 +274,8 @@ const PandaGame: React.FC = () => {
       gameStatus: 'playing',
       goodFoodCollected: 0,
       totalGoodFood: goodFoodCount,
-      hasReachedEnd: false
+      hasReachedEnd: false,
+      isMoving: false
     }))
   }, [generateMaze])
 
@@ -302,8 +305,9 @@ const PandaGame: React.FC = () => {
       if (prev.gameStatus !== 'playing') return prev
 
       let newPanda = { ...prev.panda }
+      let isMoving = false
       
-      // Handle movement with wall collision detection
+      // Handle movement with wall collision detection - ONLY when keys are pressed
       const moveSpeed = PANDA_SPEED
       
       if (prev.keysPressed.has('arrowup') || prev.keysPressed.has('w')) {
@@ -311,6 +315,7 @@ const PandaGame: React.FC = () => {
         const testPanda = { ...newPanda, y: testY }
         if (!prev.walls.some(wall => checkCollision(testPanda, wall.position, PANDA_SIZE, wall.width))) {
           newPanda = { ...newPanda, y: testY }
+          isMoving = true
         }
       }
       if (prev.keysPressed.has('arrowdown') || prev.keysPressed.has('s')) {
@@ -318,6 +323,7 @@ const PandaGame: React.FC = () => {
         const testPanda = { ...newPanda, y: testY }
         if (!prev.walls.some(wall => checkCollision(testPanda, wall.position, PANDA_SIZE, wall.width))) {
           newPanda = { ...newPanda, y: testY }
+          isMoving = true
         }
       }
       if (prev.keysPressed.has('arrowleft') || prev.keysPressed.has('a')) {
@@ -325,6 +331,7 @@ const PandaGame: React.FC = () => {
         const testPanda = { ...newPanda, x: testX }
         if (!prev.walls.some(wall => checkCollision(testPanda, wall.position, PANDA_SIZE, wall.width))) {
           newPanda = { ...newPanda, x: testX }
+          isMoving = true
         }
       }
       if (prev.keysPressed.has('arrowright') || prev.keysPressed.has('d')) {
@@ -332,6 +339,7 @@ const PandaGame: React.FC = () => {
         const testPanda = { ...newPanda, x: testX }
         if (!prev.walls.some(wall => checkCollision(testPanda, wall.position, PANDA_SIZE, wall.width))) {
           newPanda = { ...newPanda, x: testX }
+          isMoving = true
         }
       }
 
@@ -378,7 +386,8 @@ const PandaGame: React.FC = () => {
         health: newHealth,
         goodFoodCollected: newGoodFoodCollected,
         hasReachedEnd,
-        gameStatus: newGameStatus
+        gameStatus: newGameStatus,
+        isMoving
       }
     })
   }, [checkCollision])
@@ -632,29 +641,36 @@ const PandaGame: React.FC = () => {
           </div>
         </div>
 
-        {/* Panda */}
+        {/* Panda with walking animation */}
         <div
-          className="absolute text-3xl transition-all duration-75 ease-linear z-20"
+          className={`absolute text-3xl transition-all duration-75 ease-linear z-20 ${
+            gameState.isMoving ? 'animate-bounce' : ''
+          }`}
           style={{
             left: gameState.panda.x,
             top: gameState.panda.y,
             width: PANDA_SIZE,
             height: PANDA_SIZE,
+            transform: gameState.isMoving ? 'scale(1.1)' : 'scale(1)',
+            transition: 'transform 0.1s ease-in-out',
           }}
         >
           🐼
         </div>
 
-        {/* Food Items */}
+        {/* Food Items with animations */}
         {gameState.foods.map(food => (
           <div
             key={food.id}
-            className="absolute text-xl z-10"
+            className={`absolute text-xl z-10 ${
+              food.type === 'good' ? 'animate-spin' : 'animate-pulse'
+            }`}
             style={{
               left: food.position.x,
               top: food.position.y,
               width: FOOD_SIZE,
               height: FOOD_SIZE,
+              animationDuration: food.type === 'good' ? '3s' : '2s',
             }}
           >
             {food.emoji}

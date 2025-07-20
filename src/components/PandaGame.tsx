@@ -282,9 +282,11 @@ const PandaGame: React.FC = () => {
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'w', 'a', 's', 'd', 'W', 'A', 'S', 'D'].includes(event.key)) {
       event.preventDefault()
+      // Normalize arrow keys to lowercase for consistent checking
+      const normalizedKey = event.key.startsWith('Arrow') ? event.key.toLowerCase() : event.key.toLowerCase()
       setGameState(prev => ({
         ...prev,
-        keysPressed: new Set([...prev.keysPressed, event.key.toLowerCase()])
+        keysPressed: new Set([...prev.keysPressed, normalizedKey])
       }))
     }
   }, [])
@@ -292,7 +294,9 @@ const PandaGame: React.FC = () => {
   const handleKeyUp = useCallback((event: KeyboardEvent) => {
     setGameState(prev => {
       const newKeysPressed = new Set(prev.keysPressed)
-      newKeysPressed.delete(event.key.toLowerCase())
+      // Normalize arrow keys to lowercase for consistent checking
+      const normalizedKey = event.key.startsWith('Arrow') ? event.key.toLowerCase() : event.key.toLowerCase()
+      newKeysPressed.delete(normalizedKey)
       return {
         ...prev,
         keysPressed: newKeysPressed
@@ -307,8 +311,20 @@ const PandaGame: React.FC = () => {
       let newPanda = { ...prev.panda }
       let isMoving = false
       
+      // CRITICAL: Only process movement if there are actually keys pressed
+      if (prev.keysPressed.size === 0) {
+        // No keys pressed, no movement should occur
+        return {
+          ...prev,
+          isMoving: false
+        }
+      }
+      
       // Handle movement with wall collision detection - ONLY when keys are pressed
       const moveSpeed = PANDA_SPEED
+      
+      // Debug: Log current keys pressed (remove this after debugging)
+      console.log('Keys pressed:', Array.from(prev.keysPressed))
       
       if (prev.keysPressed.has('arrowup') || prev.keysPressed.has('w')) {
         const testY = Math.max(0, newPanda.y - moveSpeed)

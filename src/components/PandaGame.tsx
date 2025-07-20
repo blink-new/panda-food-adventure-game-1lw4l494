@@ -78,10 +78,10 @@ const MAZE_LAYOUTS = [
     ],
     goodFoodPositions: [
       {row: 1, col: 2}, {row: 1, col: 4}, {row: 3, col: 2}, 
-      {row: 5, col: 2}, {row: 7, col: 2}, {row: 9, col: 2}
+      {row: 5, col: 2}, {row: 7, col: 3}, {row: 9, col: 4}
     ],
     badFoodPositions: [
-      {row: 1, col: 12}, {row: 3, col: 15}, {row: 7, col: 15}
+      {row: 1, col: 12}, {row: 3, col: 15}, {row: 7, col: 17}
     ]
   },
   // Level 2 - Fixed maze with proper escape route
@@ -175,6 +175,15 @@ const PandaGame: React.FC = () => {
     const cellWidth = GAME_WIDTH / maze[0].length
     const cellHeight = GAME_HEIGHT / maze.length
     
+    // Helper function to check if a position is a valid open path (not a wall)
+    const isValidFoodPosition = (row: number, col: number): boolean => {
+      if (row < 0 || row >= maze.length || col < 0 || col >= maze[0].length) {
+        return false
+      }
+      const cell = maze[row][col]
+      return cell === '.' || cell === 'S' || cell === 'E' // Open path, start, or end
+    }
+    
     // Process maze layout for walls and positions
     maze.forEach((row, rowIndex) => {
       row.split('').forEach((cell, colIndex) => {
@@ -202,43 +211,54 @@ const PandaGame: React.FC = () => {
       })
     })
     
-    // Add good food at predefined positions
+    // Add good food at predefined positions (only if they're valid open paths)
     mazeData.goodFoodPositions.forEach((pos, index) => {
-      const x = pos.col * cellWidth
-      const y = pos.row * cellHeight
-      const food = GOOD_FOODS[index % GOOD_FOODS.length]
-      
-      foods.push({
-        id: `good-food-${index}`,
-        type: 'good',
-        emoji: food.emoji,
-        position: { 
-          x: x + cellWidth / 2 - FOOD_SIZE / 2, 
-          y: y + cellHeight / 2 - FOOD_SIZE / 2 
-        },
-        points: food.points
-      })
+      if (isValidFoodPosition(pos.row, pos.col)) {
+        const x = pos.col * cellWidth
+        const y = pos.row * cellHeight
+        const food = GOOD_FOODS[index % GOOD_FOODS.length]
+        
+        foods.push({
+          id: `good-food-${index}`,
+          type: 'good',
+          emoji: food.emoji,
+          position: { 
+            x: x + cellWidth / 2 - FOOD_SIZE / 2, 
+            y: y + cellHeight / 2 - FOOD_SIZE / 2 
+          },
+          points: food.points
+        })
+      } else {
+        console.warn(`Good food position (${pos.row}, ${pos.col}) is in a wall, skipping...`)
+      }
     })
     
-    // Add bad food at predefined positions
+    // Add bad food at predefined positions (only if they're valid open paths)
     mazeData.badFoodPositions.forEach((pos, index) => {
-      const x = pos.col * cellWidth
-      const y = pos.row * cellHeight
-      const food = BAD_FOODS[index % BAD_FOODS.length]
-      
-      foods.push({
-        id: `bad-food-${index}`,
-        type: 'bad',
-        emoji: food.emoji,
-        position: { 
-          x: x + cellWidth / 2 - FOOD_SIZE / 2, 
-          y: y + cellHeight / 2 - FOOD_SIZE / 2 
-        },
-        points: food.points
-      })
+      if (isValidFoodPosition(pos.row, pos.col)) {
+        const x = pos.col * cellWidth
+        const y = pos.row * cellHeight
+        const food = BAD_FOODS[index % BAD_FOODS.length]
+        
+        foods.push({
+          id: `bad-food-${index}`,
+          type: 'bad',
+          emoji: food.emoji,
+          position: { 
+            x: x + cellWidth / 2 - FOOD_SIZE / 2, 
+            y: y + cellHeight / 2 - FOOD_SIZE / 2 
+          },
+          points: food.points
+        })
+      } else {
+        console.warn(`Bad food position (${pos.row}, ${pos.col}) is in a wall, skipping...`)
+      }
     })
     
-    return { walls, foods, startPos, endPos, goodFoodCount: mazeData.goodFoodPositions.length }
+    // Count actual good food items placed (not the predefined count)
+    const actualGoodFoodCount = foods.filter(food => food.type === 'good').length
+    
+    return { walls, foods, startPos, endPos, goodFoodCount: actualGoodFoodCount }
   }, [])
 
   const initializeLevel = useCallback((level: number) => {
